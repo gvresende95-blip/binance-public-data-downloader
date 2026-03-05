@@ -713,6 +713,18 @@ archive_url() {
             local filename="${symbol}-${interval}-${date_part}.zip"
             echo "${BASE_URL}/${mpath}/${freq}/premiumIndexKlines/${symbol}/${interval}/${filename}"
             ;;
+        bookDepth)
+            local filename="${symbol}-bookDepth-${date_part}.zip"
+            echo "${BASE_URL}/${mpath}/${freq}/bookDepth/${symbol}/${filename}"
+            ;;
+        liquidationSnapshot)
+            local filename="${symbol}-liquidationSnapshot-${date_part}.zip"
+            echo "${BASE_URL}/${mpath}/${freq}/liquidationSnapshot/${symbol}/${filename}"
+            ;;
+        metrics)
+            local filename="${symbol}-metrics-${date_part}.zip"
+            echo "${BASE_URL}/${mpath}/${freq}/metrics/${symbol}/${filename}"
+            ;;
     esac
 }
 
@@ -734,7 +746,8 @@ cache_path() {
 market_path() {
     case "$1" in
         spot) echo "spot" ;;
-        usdm) echo "futures/um" ;;
+        usdm)  echo "futures/um" ;;
+        coinm) echo "futures/cm" ;;
     esac
 }
 
@@ -902,10 +915,12 @@ download_worker() {
         aggTrades) filename="${symbol}-aggTrades-${date_part}.zip" ;;
         bookTicker)  filename="${symbol}-bookTicker-${date_part}.zip" ;;
         fundingRate) filename="${symbol}-fundingRate-${date_part}.zip" ;;
-        markPriceKlines)
-            filename="${symbol}-${interval}-${date_part}.zip" ;;
+        markPriceKlines)     filename="${symbol}-${interval}-${date_part}.zip" ;;
         indexPriceKlines)    filename="${symbol}-${interval}-${date_part}.zip" ;;
         premiumIndexKlines)  filename="${symbol}-${interval}-${date_part}.zip" ;;
+        bookDepth)           filename="${symbol}-bookDepth-${date_part}.zip" ;;
+        liquidationSnapshot) filename="${symbol}-liquidationSnapshot-${date_part}.zip" ;;
+        metrics)             filename="${symbol}-metrics-${date_part}.zip" ;;
     esac
 
     local cpath
@@ -1148,6 +1163,18 @@ merge_outputs() {
             fi
             ts_cols="0, 6"
             ;;
+        bookDepth)
+            header="timestamp,percentage,depth,notional"
+            ts_cols=""
+            ;;
+        liquidationSnapshot)
+            header="time,side,order_type,time_in_force,original_quantity,price,average_price,order_status,last_fill_quantity,accumulated_fill_quantity"
+            ts_cols="0"
+            ;;
+        metrics)
+            header="create_time,symbol,sum_open_interest,sum_open_interest_value,count_toptrader_long_short_ratio,sum_toptrader_long_short_ratio,count_long_short_ratio,sum_taker_long_short_vol_ratio"
+            ts_cols=""
+            ;;
     esac
 
     # Sentinel ensures one iteration per symbol for no-interval dtypes
@@ -1182,6 +1209,9 @@ merge_outputs() {
                 markPriceKlines)  output_name="${sym}-markPriceKlines-${int}-${start_date}_${end_date}.csv";   label="${sym}-markPriceKlines-${int}" ;;
                 indexPriceKlines)   output_name="${sym}-indexPriceKlines-${int}-${start_date}_${end_date}.csv";   label="${sym}-indexPriceKlines-${int}" ;;
                 premiumIndexKlines) output_name="${sym}-premiumIndexKlines-${int}-${start_date}_${end_date}.csv"; label="${sym}-premiumIndexKlines-${int}" ;;
+                bookDepth)           output_name="${sym}-bookDepth-${start_date}_${end_date}.csv";           label="${sym}" ;;
+                liquidationSnapshot) output_name="${sym}-liquidationSnapshot-${start_date}_${end_date}.csv"; label="${sym}" ;;
+                metrics)             output_name="${sym}-metrics-${start_date}_${end_date}.csv";             label="${sym}" ;;
             esac
             local output_path="${OUTPUT_DIR}/${output_name}"
             local tmp_csv
@@ -1205,6 +1235,9 @@ merge_outputs() {
                     markPriceKlines)     filename="${sym}-${int}-${date_part}.zip" ;;
                     indexPriceKlines)    filename="${sym}-${int}-${date_part}.zip" ;;
                     premiumIndexKlines)  filename="${sym}-${int}-${date_part}.zip" ;;
+                    bookDepth)           filename="${sym}-bookDepth-${date_part}.zip" ;;
+                    liquidationSnapshot) filename="${sym}-liquidationSnapshot-${date_part}.zip" ;;
+                    metrics)             filename="${sym}-metrics-${date_part}.zip" ;;
                 esac
                 cpath=$(cache_path "$market" "$dtype" "$sym" "$int" "$filename")
                 if [ -f "$cpath" ] && [ -s "$cpath" ]; then
@@ -1235,6 +1268,9 @@ merge_outputs() {
                     markPriceKlines)     filename="${sym}-${int}-${date_part}.zip" ;;
                     indexPriceKlines)    filename="${sym}-${int}-${date_part}.zip" ;;
                     premiumIndexKlines)  filename="${sym}-${int}-${date_part}.zip" ;;
+                    bookDepth)           filename="${sym}-bookDepth-${date_part}.zip" ;;
+                    liquidationSnapshot) filename="${sym}-liquidationSnapshot-${date_part}.zip" ;;
+                    metrics)             filename="${sym}-metrics-${date_part}.zip" ;;
                 esac
                 cpath=$(cache_path "$market" "$dtype" "$sym" "$int" "$filename")
 
@@ -1344,6 +1380,7 @@ run_interactive() {
             case "$market_raw" in
                 "Spot")             market="spot";  market_idx=0 ;;
                 "Futures (USD-M)")  market="usdm";  market_idx=1 ;;
+                "Futures (COIN-M)") market="coinm"; market_idx=2 ;;
                 *)
                     printf '  %s⚠ %s is not yet implemented. Stay tuned!%s\n\n' "$YELLOW" "$market_raw" "$RESET" >&2
                     continue
@@ -1377,6 +1414,21 @@ run_interactive() {
                     "markPriceKlines" \
                     "indexPriceKlines" \
                     "premiumIndexKlines")
+            elif [ "$market" = "coinm" ]; then
+                dtype_raw=$(single_select \
+                    "Step 2: Select data type" \
+                    "↑↓=navigate, Enter=confirm, Esc=back" \
+                    "Klines" \
+                    "AggTrades" \
+                    "Trades" \
+                    "bookTicker" \
+                    "fundingRate" \
+                    "markPriceKlines" \
+                    "indexPriceKlines" \
+                    "premiumIndexKlines" \
+                    "bookDepth" \
+                    "liquidationSnapshot" \
+                    "metrics")
             fi
 
             if [ "$dtype_raw" = "__BACK__" ]; then
@@ -1392,6 +1444,9 @@ run_interactive() {
                 "markPriceKlines")               dtype="markPriceKlines"; dtype_idx=5 ;;
                 "indexPriceKlines")              dtype="indexPriceKlines"; dtype_idx=6 ;;
                 "premiumIndexKlines")            dtype="premiumIndexKlines"; dtype_idx=7 ;;
+                "bookDepth")                     dtype="bookDepth"; dtype_idx=8 ;;
+                "liquidationSnapshot")           dtype="liquidationSnapshot"; dtype_idx=9 ;;
+                "metrics")                       dtype="metrics"; dtype_idx=10 ;;
                 *)
                     printf '  %s⚠ %s is not yet implemented. Stay tuned!%s\n\n' "$YELLOW" "$dtype_raw" "$RESET" >&2
                     exit 0
@@ -1489,6 +1544,8 @@ run_interactive() {
             case "$dtype" in
                 fundingRate)
                     splits_str=$(printf '%s\n' "$splits_str" | grep "^monthly ") ;;
+                bookDepth|liquidationSnapshot|metrics)
+                    splits_str=$(printf '%s\n' "$splits_str" | grep "^daily ") ;;
             esac
 
             # Flush any stale keypresses from the terminal input buffer
@@ -1532,6 +1589,8 @@ run_interactive() {
             case "$dtype" in
                 fundingRate)
                     s_dl="$total_archives archives (monthly only)" ;;
+                bookDepth|liquidationSnapshot|metrics)
+                    s_dl="$total_archives archives (daily only)" ;;
                 *)
                     s_dl="$total_archives archives (${monthly_count} monthly + ${daily_count} daily)"
                     ;;
