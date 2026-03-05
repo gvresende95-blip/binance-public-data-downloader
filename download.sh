@@ -351,14 +351,13 @@ multi_select() {
                     fi
                     i=$((i + 1))
                 done
-                if [ $any_selected -eq 0 ]; then
-                    # Flash warning - redraw with message
+                if [ $any_selected -eq 0 ] && [ "$allow_empty" != "1" ]; then
+                    # Flash warning on the prompt line, then redraw
                     cursor_up "$total_lines"
-                    clear_lines "$total_lines"
-                    printf '  %s⚠ Select at least one option%s\n' "$RED" "$RESET" >&2
+                    printf '%s  %s⚠ Select at least one option%s' "$CLEAR_LINE" "$RED" "$RESET" >&2
                     sleep 0.8
-                    cursor_up 1
-                    printf '%s' "$CLEAR_LINE" >&2
+                    printf '\r%s' "$CLEAR_LINE" >&2
+                    clear_lines "$total_lines"
                     continue
                 fi
 
@@ -725,6 +724,14 @@ archive_url() {
             local filename="${symbol}-metrics-${date_part}.zip"
             echo "${BASE_URL}/${mpath}/${freq}/metrics/${symbol}/${filename}"
             ;;
+        BVOLIndex)
+            local filename="${symbol}-BVOLIndex-${date_part}.zip"
+            echo "${BASE_URL}/${mpath}/${freq}/BVOLIndex/${symbol}/${filename}"
+            ;;
+        EOHSummary)
+            local filename="${symbol}-EOHSummary-${date_part}.zip"
+            echo "${BASE_URL}/${mpath}/${freq}/EOHSummary/${symbol}/${filename}"
+            ;;
     esac
 }
 
@@ -747,7 +754,8 @@ market_path() {
     case "$1" in
         spot) echo "spot" ;;
         usdm)  echo "futures/um" ;;
-        coinm) echo "futures/cm" ;;
+        coinm)  echo "futures/cm" ;;
+        option) echo "option" ;;
     esac
 }
 
@@ -921,6 +929,8 @@ download_worker() {
         bookDepth)           filename="${symbol}-bookDepth-${date_part}.zip" ;;
         liquidationSnapshot) filename="${symbol}-liquidationSnapshot-${date_part}.zip" ;;
         metrics)             filename="${symbol}-metrics-${date_part}.zip" ;;
+        BVOLIndex)           filename="${symbol}-BVOLIndex-${date_part}.zip" ;;
+        EOHSummary)          filename="${symbol}-EOHSummary-${date_part}.zip" ;;
     esac
 
     local cpath
@@ -1004,7 +1014,7 @@ run_downloads() {
         return 0
     fi
 
-    printf '\n  %sDownloading %d archives...%s\n' "$BOLD$CYAN" "$total" "$RESET" >&2
+    printf '  %sDownloading %d archives...%s\n' "$BOLD$CYAN" "$total" "$RESET" >&2
 
     init_progress "$total"
     setup_semaphore "$MAX_PARALLEL"
@@ -1175,6 +1185,14 @@ merge_outputs() {
             header="create_time,symbol,sum_open_interest,sum_open_interest_value,count_toptrader_long_short_ratio,sum_toptrader_long_short_ratio,count_long_short_ratio,sum_taker_long_short_vol_ratio"
             ts_cols=""
             ;;
+        BVOLIndex)
+            header="calc_time,symbol,base_asset,quote_asset,index_value"
+            ts_cols="0"
+            ;;
+        EOHSummary)
+            header="date,hour,symbol,underlying,type,strike,open,high,low,close,volume_contracts,volume_usdt,best_bid_price,best_ask_price,best_bid_qty,best_ask_qty,best_buy_iv,best_sell_iv,mark_price,mark_iv,delta,gamma,vega,theta,openinterest_contracts,openinterest_usdt"
+            ts_cols=""
+            ;;
     esac
 
     # Sentinel ensures one iteration per symbol for no-interval dtypes
@@ -1212,6 +1230,8 @@ merge_outputs() {
                 bookDepth)           output_name="${sym}-bookDepth-${start_date}_${end_date}.csv";           label="${sym}" ;;
                 liquidationSnapshot) output_name="${sym}-liquidationSnapshot-${start_date}_${end_date}.csv"; label="${sym}" ;;
                 metrics)             output_name="${sym}-metrics-${start_date}_${end_date}.csv";             label="${sym}" ;;
+                BVOLIndex)           output_name="${sym}-BVOLIndex-${start_date}_${end_date}.csv";           label="${sym}" ;;
+                EOHSummary)          output_name="${sym}-EOHSummary-${start_date}_${end_date}.csv";          label="${sym}" ;;
             esac
             local output_path="${OUTPUT_DIR}/${output_name}"
             local tmp_csv
@@ -1238,6 +1258,8 @@ merge_outputs() {
                     bookDepth)           filename="${sym}-bookDepth-${date_part}.zip" ;;
                     liquidationSnapshot) filename="${sym}-liquidationSnapshot-${date_part}.zip" ;;
                     metrics)             filename="${sym}-metrics-${date_part}.zip" ;;
+                    BVOLIndex)           filename="${sym}-BVOLIndex-${date_part}.zip" ;;
+                    EOHSummary)          filename="${sym}-EOHSummary-${date_part}.zip" ;;
                 esac
                 cpath=$(cache_path "$market" "$dtype" "$sym" "$int" "$filename")
                 if [ -f "$cpath" ] && [ -s "$cpath" ]; then
@@ -1271,6 +1293,8 @@ merge_outputs() {
                     bookDepth)           filename="${sym}-bookDepth-${date_part}.zip" ;;
                     liquidationSnapshot) filename="${sym}-liquidationSnapshot-${date_part}.zip" ;;
                     metrics)             filename="${sym}-metrics-${date_part}.zip" ;;
+                    BVOLIndex)           filename="${sym}-BVOLIndex-${date_part}.zip" ;;
+                    EOHSummary)          filename="${sym}-EOHSummary-${date_part}.zip" ;;
                 esac
                 cpath=$(cache_path "$market" "$dtype" "$sym" "$int" "$filename")
 
@@ -1381,10 +1405,7 @@ run_interactive() {
                 "Spot")             market="spot";  market_idx=0 ;;
                 "Futures (USD-M)")  market="usdm";  market_idx=1 ;;
                 "Futures (COIN-M)") market="coinm"; market_idx=2 ;;
-                *)
-                    printf '  %s⚠ %s is not yet implemented. Stay tuned!%s\n\n' "$YELLOW" "$market_raw" "$RESET" >&2
-                    continue
-                    ;;
+                "Option")           market="option"; market_idx=3 ;;
             esac
             # Reset dtype selection when market changes
             if [ "$market" != "$prev_market" ]; then dtype_idx=""; fi
@@ -1429,6 +1450,12 @@ run_interactive() {
                     "bookDepth" \
                     "liquidationSnapshot" \
                     "metrics")
+            else  # option
+                dtype_raw=$(single_select \
+                    "Step 2: Select data type" \
+                    "↑↓=navigate, Enter=confirm, Esc=back" \
+                    "BVOLIndex" \
+                    "EOHSummary")
             fi
 
             if [ "$dtype_raw" = "__BACK__" ]; then
@@ -1447,6 +1474,8 @@ run_interactive() {
                 "bookDepth")                     dtype="bookDepth"; dtype_idx=8 ;;
                 "liquidationSnapshot")           dtype="liquidationSnapshot"; dtype_idx=9 ;;
                 "metrics")                       dtype="metrics"; dtype_idx=10 ;;
+                "BVOLIndex")                     dtype="BVOLIndex"; dtype_idx=0 ;;
+                "EOHSummary")                    dtype="EOHSummary"; dtype_idx=1 ;;
                 *)
                     printf '  %s⚠ %s is not yet implemented. Stay tuned!%s\n\n' "$YELLOW" "$dtype_raw" "$RESET" >&2
                     exit 0
@@ -1547,6 +1576,9 @@ run_interactive() {
                 bookDepth|liquidationSnapshot|metrics)
                     splits_str=$(printf '%s\n' "$splits_str" | grep "^daily ") ;;
             esac
+            if [ "$market" = "option" ]; then
+                splits_str=$(printf '%s\n' "$splits_str" | grep "^daily ")
+            fi
 
             # Flush any stale keypresses from the terminal input buffer
             while read -rsn1 -t 0.01 _ </dev/tty 2>/dev/null; do :; done
@@ -1592,7 +1624,11 @@ run_interactive() {
                 bookDepth|liquidationSnapshot|metrics)
                     s_dl="$total_archives archives (daily only)" ;;
                 *)
-                    s_dl="$total_archives archives (${monthly_count} monthly + ${daily_count} daily)"
+                    if [ "$market" = "option" ]; then
+                        s_dl="$total_archives archives (daily only)"
+                    else
+                        s_dl="$total_archives archives (${monthly_count} monthly + ${daily_count} daily)"
+                    fi
                     ;;
             esac
             local s_out="$total_output merged file(s)"
@@ -1628,8 +1664,8 @@ run_interactive() {
             local w=$((inner - pad))  # value column width
 
             # Count summary box lines so we can erase on back
-            local summary_lines=8  # header + 5 rows + footer
-            if has_interval "$dtype"; then summary_lines=9; fi
+            local summary_lines=9  # header + 5 rows + footer + blank line
+            if has_interval "$dtype"; then summary_lines=10; fi
 
             printf '%s  ┌─ Summary %s┐%s\n' "$BOLD" "$hline" "$RESET" >&2
             printf '%s  │%s  Market:      %s%-*s%s%s│%s\n' "$BOLD" "$RESET" "$WHITE" "$w" "$s_market" "$RESET" "$BOLD" "$RESET" >&2
@@ -1643,6 +1679,7 @@ run_interactive() {
             printf '%s  │%s  Output:      %s%-*s%s%s│%s\n' "$BOLD" "$RESET" "$WHITE" "$w" "$s_out" "$RESET" "$BOLD" "$RESET" >&2
             printf '%s  └%s┘%s\n' "$BOLD" "$bline" "$RESET" >&2
 
+            printf '\n' >&2
             _SS_INITIAL="0"
             local confirm
             confirm=$(single_select \
