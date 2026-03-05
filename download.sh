@@ -685,6 +685,14 @@ archive_url() {
             local filename="${symbol}-${interval}-${date_part}.zip"
             echo "${BASE_URL}/${mpath}/${freq}/klines/${symbol}/${interval}/${filename}"
             ;;
+        trades)
+            local filename="${symbol}-trades-${date_part}.zip"
+            echo "${BASE_URL}/${mpath}/${freq}/trades/${symbol}/${filename}"
+            ;;
+        aggTrades)
+            local filename="${symbol}-aggTrades-${date_part}.zip"
+            echo "${BASE_URL}/${mpath}/${freq}/aggTrades/${symbol}/${filename}"
+            ;;
     esac
 }
 
@@ -868,7 +876,9 @@ download_worker() {
 
     local filename
     case "$dtype" in
-        klines) filename="${symbol}-${interval}-${date_part}.zip" ;;
+        klines)    filename="${symbol}-${interval}-${date_part}.zip" ;;
+        trades)    filename="${symbol}-trades-${date_part}.zip" ;;
+        aggTrades) filename="${symbol}-aggTrades-${date_part}.zip" ;;
     esac
 
     local cpath
@@ -1063,6 +1073,14 @@ merge_outputs() {
             header="open_time,open,high,low,close,volume,close_time,quote_volume,trades,taker_buy_base_volume,taker_buy_quote_volume,ignore"
             ts_cols="0, 6"
             ;;
+        trades)
+            header="id,price,qty,quoteQty,time,isBuyerMaker,isBestMatch"
+            ts_cols="4"
+            ;;
+        aggTrades)
+            header="agg_tradeId,price,qty,first_tradeId,last_tradeId,transact_time,is_buyer_maker,is_best_match"
+            ts_cols="5"
+            ;;
     esac
 
     # Sentinel ensures one iteration per symbol for no-interval dtypes
@@ -1089,7 +1107,9 @@ merge_outputs() {
             # Build output filename and display label
             local output_name label
             case "$dtype" in
-                klines) output_name="${sym}-klines-${int}-${start_date}_${end_date}.csv"; label="${sym}-klines-${int}" ;;
+                klines)    output_name="${sym}-klines-${int}-${start_date}_${end_date}.csv";    label="${sym}-klines-${int}" ;;
+                trades)    output_name="${sym}-trades-${start_date}_${end_date}.csv";    label="${sym}" ;;
+                aggTrades) output_name="${sym}-aggTrades-${start_date}_${end_date}.csv"; label="${sym}" ;;
             esac
             local output_path="${OUTPUT_DIR}/${output_name}"
             local tmp_csv
@@ -1105,7 +1125,9 @@ merge_outputs() {
                 freq=$(echo "$split_line" | cut -d' ' -f1)
                 date_part=$(echo "$split_line" | cut -d' ' -f2)
                 case "$dtype" in
-                    klines) filename="${sym}-${int}-${date_part}.zip" ;;
+                    klines)    filename="${sym}-${int}-${date_part}.zip" ;;
+                    trades)    filename="${sym}-trades-${date_part}.zip" ;;
+                    aggTrades) filename="${sym}-aggTrades-${date_part}.zip" ;;
                 esac
                 cpath=$(cache_path "$market" "$dtype" "$sym" "$int" "$filename")
                 if [ -f "$cpath" ] && [ -s "$cpath" ]; then
@@ -1128,7 +1150,9 @@ merge_outputs() {
                 freq=$(echo "$split_line" | cut -d' ' -f1)
                 date_part=$(echo "$split_line" | cut -d' ' -f2)
                 case "$dtype" in
-                    klines) filename="${sym}-${int}-${date_part}.zip" ;;
+                    klines)    filename="${sym}-${int}-${date_part}.zip" ;;
+                    trades)    filename="${sym}-trades-${date_part}.zip" ;;
+                    aggTrades) filename="${sym}-aggTrades-${date_part}.zip" ;;
                 esac
                 cpath=$(cache_path "$market" "$dtype" "$sym" "$int" "$filename")
 
@@ -1255,7 +1279,9 @@ run_interactive() {
                 dtype_raw=$(single_select \
                     "Step 2: Select data type" \
                     "↑↓=navigate, Enter=confirm, Esc=back" \
-                    "Klines (candlestick)")
+                    "Klines (candlestick)" \
+                    "Trades" \
+                    "AggTrades")
             fi
 
             if [ "$dtype_raw" = "__BACK__" ]; then
@@ -1264,6 +1290,8 @@ run_interactive() {
 
             case "$dtype_raw" in
                 "Klines (candlestick)") dtype="klines"; dtype_idx=0 ;;
+                "Trades")               dtype="trades"; dtype_idx=1 ;;
+                "AggTrades")            dtype="aggTrades"; dtype_idx=2 ;;
                 *)
                     printf '  %s⚠ %s is not yet implemented. Stay tuned!%s\n\n' "$YELLOW" "$dtype_raw" "$RESET" >&2
                     exit 0
