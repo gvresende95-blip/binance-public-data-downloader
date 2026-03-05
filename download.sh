@@ -253,6 +253,8 @@ multi_select() {
         done
     fi
     _MS_INITIAL=""
+    local allow_empty="${_MS_ALLOW_EMPTY:-}"
+    _MS_ALLOW_EMPTY=""
 
     printf '%s' "$HIDE_CURSOR" >&2
 
@@ -280,7 +282,11 @@ multi_select() {
             i=$((i + 1))
         done
 
-        printf '  %s(Space=toggle, a=all, Enter=confirm, Esc=back)%s\n' "$DIM" "$RESET" >&2
+        if [ "$allow_empty" = "1" ]; then
+            printf '  %s(Space=toggle, a=all, n=none, Enter=confirm, Esc=back)%s\n' "$DIM" "$RESET" >&2
+        else
+            printf '  %s(Space=toggle, a=all, Enter=confirm, Esc=back)%s\n' "$DIM" "$RESET" >&2
+        fi
         printf '\n' >&2
 
         local key
@@ -333,6 +339,17 @@ multi_select() {
                 fi
                 selected="$new_selected"
                 ;;
+            n)
+                if [ "$allow_empty" = "1" ]; then
+                    local new_selected=""
+                    local i=0
+                    while [ $i -lt $count ]; do
+                        new_selected="${new_selected}0"
+                        i=$((i + 1))
+                    done
+                    selected="$new_selected"
+                fi
+                ;;
             escape)
                 cursor_up "$total_lines"
                 clear_lines "$total_lines"
@@ -341,7 +358,7 @@ multi_select() {
                 return 0
                 ;;
             enter)
-                # Validate at least one selected
+                # Validate at least one selected (unless allow-empty)
                 local any_selected=0
                 local i=0
                 while [ $i -lt $count ]; do
@@ -1110,20 +1127,38 @@ run_downloads() {
 # Section 7: Merge Engine
 # ============================================================================
 
+# get_ts_columns MARKET DTYPE
+# Outputs "col_name:index col_name:index ..." for timestamp columns
+get_ts_columns() {
+    local market="$1" dtype="$2"
+    case "$dtype" in
+        klines)                echo "open_time:0 close_time:6" ;;
+        trades)                echo "time:4" ;;
+        aggTrades)             echo "transact_time:5" ;;
+        bookTicker)            echo "transaction_time:5 event_time:6" ;;
+        fundingRate)           echo "calc_time:0" ;;
+        markPriceKlines|indexPriceKlines|premiumIndexKlines)
+                               echo "open_time:0 close_time:6" ;;
+        liquidationSnapshot)   echo "time:0" ;;
+        BVOLIndex)             echo "calc_time:0" ;;
+        *)                     echo "" ;;
+    esac
+}
+
 # Merge cached zips into final output files
-# merge_outputs MARKET DTYPE SYMBOLS_STR INTERVALS_STR START_DATE END_DATE SPLITS_STR
+# merge_outputs MARKET DTYPE SYMBOLS_STR INTERVALS_STR START_DATE END_DATE SPLITS_STR [TS_COLS]
 merge_outputs() {
     local market="$1" dtype="$2" symbols_str="$3" intervals_str="$4"
     local start_date="$5" end_date="$6" splits_str="$7"
+    local ts_cols_override="${8-__auto__}"
 
     mkdir -p "$OUTPUT_DIR"
 
-    # Dtype-specific metadata
-    local header ts_cols
+    # Dtype-specific header
+    local header
     case "$dtype" in
         klines)
             header="open_time,open,high,low,close,volume,close_time,quote_volume,trades,taker_buy_base_volume,taker_buy_quote_volume,ignore"
-            ts_cols="0, 6"
             ;;
         trades)
             case "$market" in
@@ -1131,7 +1166,6 @@ merge_outputs() {
                 coinm) header="id,price,qty,base_qty,time,is_buyer_maker" ;;
                 *)     header="id,price,qty,quoteQty,time,isBuyerMaker,isBestMatch" ;;
             esac
-            ts_cols="4"
             ;;
         aggTrades)
             case "$market" in
@@ -1139,15 +1173,12 @@ merge_outputs() {
                 coinm) header="agg_trade_id,price,quantity,first_trade_id,last_trade_id,transact_time,is_buyer_maker" ;;
                 *)     header="agg_tradeId,price,qty,first_tradeId,last_tradeId,transact_time,is_buyer_maker,is_best_match" ;;
             esac
-            ts_cols="5"
             ;;
         bookTicker)
             header="update_id,best_bid_price,best_bid_qty,best_ask_price,best_ask_qty,transaction_time,event_time"
-            ts_cols="5, 6"
             ;;
         fundingRate)
             header="calc_time,funding_interval_hours,last_funding_rate"
-            ts_cols="0"
             ;;
         markPriceKlines)
             if [ "$market" = "usdm" ]; then
@@ -1155,7 +1186,6 @@ merge_outputs() {
             else
                 header="open_time,open,high,low,close,volume,close_time,quote_volume,count,taker_buy_volume,taker_buy_quote_volume,ignore"
             fi
-            ts_cols="0, 6"
             ;;
         indexPriceKlines)
             if [ "$market" = "usdm" ]; then
@@ -1163,7 +1193,6 @@ merge_outputs() {
             else
                 header="open_time,open,high,low,close,volume,close_time,quote_volume,count,taker_buy_volume,taker_buy_quote_volume,ignore"
             fi
-            ts_cols="0, 6"
             ;;
         premiumIndexKlines)
             if [ "$market" = "usdm" ]; then
@@ -1171,29 +1200,36 @@ merge_outputs() {
             else
                 header="open_time,open,high,low,close,volume,close_time,quote_volume,count,taker_buy_volume,taker_buy_quote_volume,ignore"
             fi
-            ts_cols="0, 6"
             ;;
         bookDepth)
             header="timestamp,percentage,depth,notional"
-            ts_cols=""
             ;;
         liquidationSnapshot)
             header="time,side,order_type,time_in_force,original_quantity,price,average_price,order_status,last_fill_quantity,accumulated_fill_quantity"
-            ts_cols="0"
             ;;
         metrics)
             header="create_time,symbol,sum_open_interest,sum_open_interest_value,count_toptrader_long_short_ratio,sum_toptrader_long_short_ratio,count_long_short_ratio,sum_taker_long_short_vol_ratio"
-            ts_cols=""
             ;;
         BVOLIndex)
             header="calc_time,symbol,base_asset,quote_asset,index_value"
-            ts_cols="0"
             ;;
         EOHSummary)
             header="date,hour,symbol,underlying,type,strike,open,high,low,close,volume_contracts,volume_usdt,best_bid_price,best_ask_price,best_bid_qty,best_ask_qty,best_buy_iv,best_sell_iv,mark_price,mark_iv,delta,gamma,vega,theta,openinterest_contracts,openinterest_usdt"
-            ts_cols=""
             ;;
     esac
+
+    # Determine timestamp columns to convert
+    local ts_cols
+    if [ "$ts_cols_override" = "__auto__" ]; then
+        local ts_info pair
+        ts_info=$(get_ts_columns "$market" "$dtype")
+        ts_cols=""
+        for pair in $ts_info; do
+            ts_cols="${ts_cols:+$ts_cols, }${pair##*:}"
+        done
+    else
+        ts_cols="$ts_cols_override"
+    fi
 
     # Sentinel ensures one iteration per symbol for no-interval dtypes
     local _iter_intervals="${intervals_str:-__none__}"
@@ -1310,27 +1346,31 @@ merge_outputs() {
             IFS="$old_ifs"
 
             if [ $has_data -eq 1 ] && [ -s "$tmp_csv" ]; then
-                printf '\r%s    %s[%d/%d]%s Converting timestamps %s...%s' \
-                    "$CLEAR_LINE" "$CYAN" "$current_output" "$total_outputs" "$RESET" \
-                    "$label" "$CLEAR_LINE" >&2
-
-                # Write CSV header + convert unix timestamps to human-readable UTC
                 rm -f "$output_path"
-                {
-                    echo "$header"
-                    TS_COLS="$ts_cols" perl -MPOSIX=strftime -F, -lane '
-                        my @cols = split /,\s*/, $ENV{TS_COLS};
-                        for my $i (@cols) {
-                            if (defined $F[$i] && $F[$i] =~ /^\d{10,}$/) {
-                                my $epoch = $F[$i] > 9_999_999_999_999
-                                    ? $F[$i] / 1_000_000
-                                    : $F[$i] / 1_000;
-                                $F[$i] = strftime("%Y-%m-%d %H:%M:%S", gmtime(int($epoch)));
+                if [ -n "$ts_cols" ]; then
+                    printf '\r%s    %s[%d/%d]%s Converting timestamps %s...%s' \
+                        "$CLEAR_LINE" "$CYAN" "$current_output" "$total_outputs" "$RESET" \
+                        "$label" "$CLEAR_LINE" >&2
+
+                    # Write CSV header + convert unix timestamps to human-readable UTC
+                    {
+                        echo "$header"
+                        TS_COLS="$ts_cols" perl -MPOSIX=strftime -F, -lane '
+                            my @cols = split /,\s*/, $ENV{TS_COLS};
+                            for my $i (@cols) {
+                                if (defined $F[$i] && $F[$i] =~ /^\d{10,}$/) {
+                                    my $epoch = $F[$i] > 9_999_999_999_999
+                                        ? $F[$i] / 1_000_000
+                                        : $F[$i] / 1_000;
+                                    $F[$i] = strftime("%Y-%m-%d %H:%M:%S", gmtime(int($epoch)));
+                                }
                             }
-                        }
-                        print join(",", @F);
-                    ' "$tmp_csv"
-                } > "$output_path"
+                            print join(",", @F);
+                        ' "$tmp_csv"
+                    } > "$output_path"
+                else
+                    { echo "$header"; cat "$tmp_csv"; } > "$output_path"
+                fi
 
                 local size
                 size=$(du -h "$output_path" | cut -f1 | tr -d ' ')
@@ -1377,10 +1417,12 @@ run_interactive() {
     local market="" dtype="" symbols_str="" intervals_str=""
     local start_date="" end_date="" splits_str=""
     local yesterday
+    local ts_cols=""
 
     # Selection state preserved across back navigation
     local market_idx="" dtype_idx=""
     local symbols_raw_saved=""
+    local ts_cols_saved=""
 
     while true; do
         case $step in
@@ -1486,10 +1528,19 @@ run_interactive() {
 
         3)
             # ── Step 3: Enter trading pairs ──
+            local pair_hint
+            case "$market" in
+                coinm)  pair_hint="e.g. BTCUSD_PERP, ETHUSD_PERP" ;;
+                option) case "$dtype" in
+                            BVOLIndex) pair_hint="e.g. BTCBVOLUSDT, ETHBVOLUSDT" ;;
+                            *)         pair_hint="e.g. BTCUSDT, ETHUSDT" ;;
+                        esac ;;
+                *)      pair_hint="e.g. BTCUSDT, ETHUSDT" ;;
+            esac
             local symbols_raw
             symbols_raw=$(text_input \
                 "Step 3: Enter trading pairs" \
-                "Comma-separated, e.g. BTCUSDT, ETHUSDT (Esc=back)" \
+                "Comma-separated, ${pair_hint} (Esc=back)" \
                 "$symbols_raw_saved")
 
             if [ "$symbols_raw" = "__BACK__" ]; then
@@ -1567,13 +1618,72 @@ run_interactive() {
             ;;
 
         7)
+            # ── Step 7: Timestamp column selection ──
+            local ts_info
+            ts_info=$(get_ts_columns "$market" "$dtype")
+            if [ -z "$ts_info" ]; then
+                # No timestamp columns for this dtype — skip to summary
+                ts_cols=""
+                step=8; continue
+            fi
+
+            # Build column name list for multi_select
+            local ts_names=""
+            local ts_count=0
+            local pair
+            for pair in $ts_info; do
+                ts_names="${ts_names:+$ts_names }${pair%%:*}"
+                ts_count=$((ts_count + 1))
+            done
+
+            _MS_ALLOW_EMPTY=1
+            if [ -n "$ts_cols_saved" ]; then
+                _MS_INITIAL=$(_build_ms_state "$ts_cols_saved" $ts_names)
+            else
+                # None selected by default
+                _MS_INITIAL=""
+                local i=0
+                while [ $i -lt $ts_count ]; do _MS_INITIAL="${_MS_INITIAL}0"; i=$((i+1)); done
+            fi
+
+            # shellcheck disable=SC2086
+            local ts_selected
+            ts_selected=$(multi_select \
+                "Step 7: Convert timestamp columns?" \
+                "Converts Unix epoch → YYYY-MM-DD HH:MM:SS" \
+                $ts_names)
+
+            if [ "$ts_selected" = "__BACK__" ]; then
+                step=6; continue
+            fi
+
+            ts_cols_saved="$ts_selected"
+
+            if [ -n "$ts_selected" ]; then
+                ts_cols=""
+                for pair in $ts_info; do
+                    local name="${pair%%:*}" idx="${pair##*:}"
+                    local sel
+                    for sel in $ts_selected; do
+                        if [ "$sel" = "$name" ]; then
+                            ts_cols="${ts_cols:+$ts_cols, }$idx"
+                        fi
+                    done
+                done
+            else
+                ts_cols=""
+            fi
+            step=8
+            ;;
+
+        8)
             # ── Compute date splits ──
             splits_str=$(compute_date_splits "$start_date" "$end_date")
             # Filter splits by archive availability
             case "$dtype" in
                 fundingRate)
                     splits_str=$(printf '%s\n' "$splits_str" | grep "^monthly ") ;;
-                bookDepth|liquidationSnapshot|metrics)
+                bookDepth|bookTicker|liquidationSnapshot|metrics)
                     splits_str=$(printf '%s\n' "$splits_str" | grep "^daily ") ;;
             esac
             if [ "$market" = "option" ]; then
@@ -1633,18 +1743,29 @@ run_interactive() {
             esac
             local s_out="$total_output merged file(s)"
 
+            # Build timestamp conversion display string
+            local s_ts
+            if [ -n "$ts_cols" ]; then
+                s_ts="$ts_cols_saved"
+                # Replace spaces with ", " for display
+                s_ts=$(echo "$s_ts" | tr ' ' ',')
+                s_ts=$(echo "$s_ts" | sed 's/,/, /g')
+            else
+                s_ts="none"
+            fi
+
             # Find max content width: "  Label:      Value  " (label=13 + value + 2 padding)
             local pad=15  # left label area width
             local rpad=2  # right padding before border
             local max_val=0
             local v
             if has_interval "$dtype"; then
-                for v in "$s_market" "$s_dtype" "$s_pairs" "$s_tf" "$s_range" "$s_dl" "$s_out"; do
+                for v in "$s_market" "$s_dtype" "$s_pairs" "$s_tf" "$s_range" "$s_dl" "$s_out" "$s_ts"; do
                     local len=${#v}
                     if [ "$len" -gt "$max_val" ]; then max_val=$len; fi
                 done
             else
-                for v in "$s_market" "$s_dtype" "$s_pairs" "$s_range" "$s_dl" "$s_out"; do
+                for v in "$s_market" "$s_dtype" "$s_pairs" "$s_range" "$s_dl" "$s_out" "$s_ts"; do
                     local len=${#v}
                     if [ "$len" -gt "$max_val" ]; then max_val=$len; fi
                 done
@@ -1664,8 +1785,8 @@ run_interactive() {
             local w=$((inner - pad))  # value column width
 
             # Count summary box lines so we can erase on back
-            local summary_lines=9  # header + 5 rows + footer + blank line
-            if has_interval "$dtype"; then summary_lines=10; fi
+            local summary_lines=10  # header + 6 rows + footer + blank line
+            if has_interval "$dtype"; then summary_lines=11; fi
 
             printf '%s  ┌─ Summary %s┐%s\n' "$BOLD" "$hline" "$RESET" >&2
             printf '%s  │%s  Market:      %s%-*s%s%s│%s\n' "$BOLD" "$RESET" "$WHITE" "$w" "$s_market" "$RESET" "$BOLD" "$RESET" >&2
@@ -1675,6 +1796,7 @@ run_interactive() {
                 printf '%s  │%s  Timeframes:  %s%-*s%s%s│%s\n' "$BOLD" "$RESET" "$WHITE" "$w" "$s_tf" "$RESET" "$BOLD" "$RESET" >&2
             fi
             printf '%s  │%s  Range:       %s%-*s%s%s│%s\n' "$BOLD" "$RESET" "$WHITE" "$w" "$s_range" "$RESET" "$BOLD" "$RESET" >&2
+            printf '%s  │%s  Timestamps:  %s%-*s%s%s│%s\n' "$BOLD" "$RESET" "$WHITE" "$w" "$s_ts" "$RESET" "$BOLD" "$RESET" >&2
             printf '%s  │%s  Downloads:   %s%-*s%s%s│%s\n' "$BOLD" "$RESET" "$WHITE" "$w" "$s_dl" "$RESET" "$BOLD" "$RESET" >&2
             printf '%s  │%s  Output:      %s%-*s%s%s│%s\n' "$BOLD" "$RESET" "$WHITE" "$w" "$s_out" "$RESET" "$BOLD" "$RESET" >&2
             printf '%s  └%s┘%s\n' "$BOLD" "$bline" "$RESET" >&2
@@ -1691,7 +1813,7 @@ run_interactive() {
             if [ "$confirm" = "__BACK__" ]; then
                 cursor_up "$summary_lines"
                 clear_lines "$summary_lines"
-                step=6; continue
+                step=7; continue
             fi
 
             if [ "$confirm" != "Yes, proceed" ]; then
@@ -1708,17 +1830,92 @@ run_interactive() {
     run_downloads "$market" "$dtype" "$symbols_str" "$intervals_str" "$splits_str"
 
     # ── Merge ──
-    merge_outputs "$market" "$dtype" "$symbols_str" "$intervals_str" "$start_date" "$end_date" "$splits_str"
+    merge_outputs "$market" "$dtype" "$symbols_str" "$intervals_str" \
+        "$start_date" "$end_date" "$splits_str" "$ts_cols"
 }
 
 # ============================================================================
-# Section 9: Main Entry Point
+# Section 9: CLI Mode
+# ============================================================================
+
+run_cli() {
+    local market="$1" dtype="$2" symbols_raw="$3" interval_raw="$4"
+    local start_date="$5" end_date="$6" ts_convert="$7"
+    shift 7
+
+    local output_dir="./downloads"
+    local quiet=0
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --output_dir) output_dir="$2"; shift 2 ;;
+            --silent|-s) quiet=1; shift ;;
+            *) printf '%sError: Unknown option: %s%s\n' "$RED" "$1" "$RESET" >&2; exit 1 ;;
+        esac
+    done
+
+    OUTPUT_DIR="$output_dir"
+    if [ "$quiet" = 1 ]; then exec 2>/dev/null; fi
+
+    # Normalize
+    local symbols_str
+    symbols_str=$(echo "$symbols_raw" | tr ',' ' ')
+    local intervals_str=""
+    [ "$interval_raw" != "-" ] && intervals_str="$interval_raw"
+
+    # Compute date splits
+    local splits_str
+    splits_str=$(compute_date_splits "$start_date" "$end_date")
+
+    # Filter splits by archive availability
+    case "$dtype" in
+        fundingRate)
+            splits_str=$(printf '%s\n' "$splits_str" | grep "^monthly ") ;;
+        bookDepth|bookTicker|liquidationSnapshot|metrics)
+            splits_str=$(printf '%s\n' "$splits_str" | grep "^daily ") ;;
+    esac
+    if [ "$market" = "option" ]; then
+        splits_str=$(printf '%s\n' "$splits_str" | grep "^daily ")
+    fi
+
+    # ts_convert: "none" = skip, "all" = auto-detect, or comma-separated column names
+    local ts_cols_override=""
+    if [ "$ts_convert" = "all" ]; then
+        ts_cols_override="__auto__"
+    elif [ "$ts_convert" != "none" ]; then
+        # Map column names to indices
+        local ts_info pair name idx
+        ts_info=$(get_ts_columns "$market" "$dtype")
+        local col matched
+        for col in $(echo "$ts_convert" | tr ',' ' '); do
+            matched=0
+            for pair in $ts_info; do
+                name="${pair%%:*}"; idx="${pair##*:}"
+                if [ "$col" = "$name" ]; then
+                    ts_cols_override="${ts_cols_override:+$ts_cols_override, }$idx"
+                    matched=1
+                fi
+            done
+            if [ "$matched" = 0 ]; then
+                printf '%sWarning: Unknown timestamp column "%s" for %s — skipping%s\n' "$YELLOW" "$col" "$dtype" "$RESET" >&2
+            fi
+        done
+    fi
+
+    # Download + merge
+    run_downloads "$market" "$dtype" "$symbols_str" "$intervals_str" "$splits_str"
+    merge_outputs "$market" "$dtype" "$symbols_str" "$intervals_str" \
+                  "$start_date" "$end_date" "$splits_str" "$ts_cols_override"
+}
+
+# ============================================================================
+# Section 10: Main Entry Point
 # ============================================================================
 
 main() {
     # Check dependencies
     local missing=""
-    for cmd in curl unzip; do
+    for cmd in curl unzip perl; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             missing="$missing $cmd"
         fi
@@ -1731,13 +1928,17 @@ main() {
         exit 1
     fi
 
-    # Ensure terminal is available for interactive input
-    if [ ! -t 0 ] && [ ! -e /dev/tty ]; then
-        printf '%sError: Interactive terminal required. Run from a terminal emulator.%s\n' "$RED" "$RESET" >&2
-        exit 1
-    fi
+    if [ $# -ge 7 ]; then
+        run_cli "$@"
+    else
+        # Ensure terminal is available for interactive input
+        if [ ! -t 0 ] && [ ! -e /dev/tty ]; then
+            printf '%sError: Interactive terminal required. Run from a terminal emulator.%s\n' "$RED" "$RESET" >&2
+            exit 1
+        fi
 
-    run_interactive
+        run_interactive
+    fi
 }
 
 main "$@"
