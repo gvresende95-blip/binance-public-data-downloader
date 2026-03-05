@@ -693,6 +693,26 @@ archive_url() {
             local filename="${symbol}-aggTrades-${date_part}.zip"
             echo "${BASE_URL}/${mpath}/${freq}/aggTrades/${symbol}/${filename}"
             ;;
+        bookTicker)
+            local filename="${symbol}-bookTicker-${date_part}.zip"
+            echo "${BASE_URL}/${mpath}/${freq}/bookTicker/${symbol}/${filename}"
+            ;;
+        fundingRate)
+            local filename="${symbol}-fundingRate-${date_part}.zip"
+            echo "${BASE_URL}/${mpath}/${freq}/fundingRate/${symbol}/${filename}"
+            ;;
+        markPriceKlines)
+            local filename="${symbol}-${interval}-${date_part}.zip"
+            echo "${BASE_URL}/${mpath}/${freq}/markPriceKlines/${symbol}/${interval}/${filename}"
+            ;;
+        indexPriceKlines)
+            local filename="${symbol}-${interval}-${date_part}.zip"
+            echo "${BASE_URL}/${mpath}/${freq}/indexPriceKlines/${symbol}/${interval}/${filename}"
+            ;;
+        premiumIndexKlines)
+            local filename="${symbol}-${interval}-${date_part}.zip"
+            echo "${BASE_URL}/${mpath}/${freq}/premiumIndexKlines/${symbol}/${interval}/${filename}"
+            ;;
     esac
 }
 
@@ -714,13 +734,14 @@ cache_path() {
 market_path() {
     case "$1" in
         spot) echo "spot" ;;
+        usdm) echo "futures/um" ;;
     esac
 }
 
 # Returns 0 if dtype uses an interval dimension, 1 otherwise
 has_interval() {
     case "$1" in
-        klines) return 0 ;;
+        klines|markPriceKlines|indexPriceKlines|premiumIndexKlines) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -879,6 +900,12 @@ download_worker() {
         klines)    filename="${symbol}-${interval}-${date_part}.zip" ;;
         trades)    filename="${symbol}-trades-${date_part}.zip" ;;
         aggTrades) filename="${symbol}-aggTrades-${date_part}.zip" ;;
+        bookTicker)  filename="${symbol}-bookTicker-${date_part}.zip" ;;
+        fundingRate) filename="${symbol}-fundingRate-${date_part}.zip" ;;
+        markPriceKlines)
+            filename="${symbol}-${interval}-${date_part}.zip" ;;
+        indexPriceKlines)    filename="${symbol}-${interval}-${date_part}.zip" ;;
+        premiumIndexKlines)  filename="${symbol}-${interval}-${date_part}.zip" ;;
     esac
 
     local cpath
@@ -1074,12 +1101,52 @@ merge_outputs() {
             ts_cols="0, 6"
             ;;
         trades)
-            header="id,price,qty,quoteQty,time,isBuyerMaker,isBestMatch"
+            case "$market" in
+                usdm)  header="id,price,qty,quoteQty,time,isBuyerMaker" ;;
+                coinm) header="id,price,qty,base_qty,time,is_buyer_maker" ;;
+                *)     header="id,price,qty,quoteQty,time,isBuyerMaker,isBestMatch" ;;
+            esac
             ts_cols="4"
             ;;
         aggTrades)
-            header="agg_tradeId,price,qty,first_tradeId,last_tradeId,transact_time,is_buyer_maker,is_best_match"
+            case "$market" in
+                usdm)  header="agg_tradeId,price,qty,first_tradeId,last_tradeId,transact_time,is_buyer_maker" ;;
+                coinm) header="agg_trade_id,price,quantity,first_trade_id,last_trade_id,transact_time,is_buyer_maker" ;;
+                *)     header="agg_tradeId,price,qty,first_tradeId,last_tradeId,transact_time,is_buyer_maker,is_best_match" ;;
+            esac
             ts_cols="5"
+            ;;
+        bookTicker)
+            header="update_id,best_bid_price,best_bid_qty,best_ask_price,best_ask_qty,transaction_time,event_time"
+            ts_cols="5, 6"
+            ;;
+        fundingRate)
+            header="calc_time,funding_interval_hours,last_funding_rate"
+            ts_cols="0"
+            ;;
+        markPriceKlines)
+            if [ "$market" = "usdm" ]; then
+                header="open_time,open,high,low,close,ignore,close_time,ignore,ignore,ignore,ignore,ignore"
+            else
+                header="open_time,open,high,low,close,volume,close_time,quote_volume,count,taker_buy_volume,taker_buy_quote_volume,ignore"
+            fi
+            ts_cols="0, 6"
+            ;;
+        indexPriceKlines)
+            if [ "$market" = "usdm" ]; then
+                header="open_time,open,high,low,close,ignore,close_time,ignore,ignore,ignore,ignore,ignore"
+            else
+                header="open_time,open,high,low,close,volume,close_time,quote_volume,count,taker_buy_volume,taker_buy_quote_volume,ignore"
+            fi
+            ts_cols="0, 6"
+            ;;
+        premiumIndexKlines)
+            if [ "$market" = "usdm" ]; then
+                header="open_time,open,high,low,close,ignore,close_time,ignore,ignore,ignore,ignore,ignore"
+            else
+                header="open_time,open,high,low,close,volume,close_time,quote_volume,count,taker_buy_volume,taker_buy_quote_volume,ignore"
+            fi
+            ts_cols="0, 6"
             ;;
     esac
 
@@ -1107,9 +1174,14 @@ merge_outputs() {
             # Build output filename and display label
             local output_name label
             case "$dtype" in
-                klines)    output_name="${sym}-klines-${int}-${start_date}_${end_date}.csv";    label="${sym}-klines-${int}" ;;
-                trades)    output_name="${sym}-trades-${start_date}_${end_date}.csv";    label="${sym}" ;;
-                aggTrades) output_name="${sym}-aggTrades-${start_date}_${end_date}.csv"; label="${sym}" ;;
+                klines)          output_name="${sym}-klines-${int}-${start_date}_${end_date}.csv";                    label="${sym}-klines-${int}" ;;
+                trades)          output_name="${sym}-trades-${start_date}_${end_date}.csv";                    label="${sym}" ;;
+                aggTrades)       output_name="${sym}-aggTrades-${start_date}_${end_date}.csv";                 label="${sym}" ;;
+                bookTicker)      output_name="${sym}-bookTicker-${start_date}_${end_date}.csv";                label="${sym}" ;;
+                fundingRate)     output_name="${sym}-fundingRate-${start_date}_${end_date}.csv";               label="${sym}" ;;
+                markPriceKlines)  output_name="${sym}-markPriceKlines-${int}-${start_date}_${end_date}.csv";   label="${sym}-markPriceKlines-${int}" ;;
+                indexPriceKlines)   output_name="${sym}-indexPriceKlines-${int}-${start_date}_${end_date}.csv";   label="${sym}-indexPriceKlines-${int}" ;;
+                premiumIndexKlines) output_name="${sym}-premiumIndexKlines-${int}-${start_date}_${end_date}.csv"; label="${sym}-premiumIndexKlines-${int}" ;;
             esac
             local output_path="${OUTPUT_DIR}/${output_name}"
             local tmp_csv
@@ -1125,9 +1197,14 @@ merge_outputs() {
                 freq=$(echo "$split_line" | cut -d' ' -f1)
                 date_part=$(echo "$split_line" | cut -d' ' -f2)
                 case "$dtype" in
-                    klines)    filename="${sym}-${int}-${date_part}.zip" ;;
-                    trades)    filename="${sym}-trades-${date_part}.zip" ;;
-                    aggTrades) filename="${sym}-aggTrades-${date_part}.zip" ;;
+                    klines)          filename="${sym}-${int}-${date_part}.zip" ;;
+                    trades)          filename="${sym}-trades-${date_part}.zip" ;;
+                    aggTrades)       filename="${sym}-aggTrades-${date_part}.zip" ;;
+                    bookTicker)      filename="${sym}-bookTicker-${date_part}.zip" ;;
+                    fundingRate)     filename="${sym}-fundingRate-${date_part}.zip" ;;
+                    markPriceKlines)     filename="${sym}-${int}-${date_part}.zip" ;;
+                    indexPriceKlines)    filename="${sym}-${int}-${date_part}.zip" ;;
+                    premiumIndexKlines)  filename="${sym}-${int}-${date_part}.zip" ;;
                 esac
                 cpath=$(cache_path "$market" "$dtype" "$sym" "$int" "$filename")
                 if [ -f "$cpath" ] && [ -s "$cpath" ]; then
@@ -1150,9 +1227,14 @@ merge_outputs() {
                 freq=$(echo "$split_line" | cut -d' ' -f1)
                 date_part=$(echo "$split_line" | cut -d' ' -f2)
                 case "$dtype" in
-                    klines)    filename="${sym}-${int}-${date_part}.zip" ;;
-                    trades)    filename="${sym}-trades-${date_part}.zip" ;;
-                    aggTrades) filename="${sym}-aggTrades-${date_part}.zip" ;;
+                    klines)          filename="${sym}-${int}-${date_part}.zip" ;;
+                    trades)          filename="${sym}-trades-${date_part}.zip" ;;
+                    aggTrades)       filename="${sym}-aggTrades-${date_part}.zip" ;;
+                    bookTicker)      filename="${sym}-bookTicker-${date_part}.zip" ;;
+                    fundingRate)     filename="${sym}-fundingRate-${date_part}.zip" ;;
+                    markPriceKlines)     filename="${sym}-${int}-${date_part}.zip" ;;
+                    indexPriceKlines)    filename="${sym}-${int}-${date_part}.zip" ;;
+                    premiumIndexKlines)  filename="${sym}-${int}-${date_part}.zip" ;;
                 esac
                 cpath=$(cache_path "$market" "$dtype" "$sym" "$int" "$filename")
 
@@ -1261,6 +1343,7 @@ run_interactive() {
             local prev_market="$market"
             case "$market_raw" in
                 "Spot")             market="spot";  market_idx=0 ;;
+                "Futures (USD-M)")  market="usdm";  market_idx=1 ;;
                 *)
                     printf '  %s⚠ %s is not yet implemented. Stay tuned!%s\n\n' "$YELLOW" "$market_raw" "$RESET" >&2
                     continue
@@ -1282,6 +1365,18 @@ run_interactive() {
                     "Klines (candlestick)" \
                     "Trades" \
                     "AggTrades")
+            elif [ "$market" = "usdm" ]; then
+                dtype_raw=$(single_select \
+                    "Step 2: Select data type" \
+                    "↑↓=navigate, Enter=confirm, Esc=back" \
+                    "Klines" \
+                    "AggTrades" \
+                    "Trades" \
+                    "bookTicker" \
+                    "fundingRate" \
+                    "markPriceKlines" \
+                    "indexPriceKlines" \
+                    "premiumIndexKlines")
             fi
 
             if [ "$dtype_raw" = "__BACK__" ]; then
@@ -1289,9 +1384,14 @@ run_interactive() {
             fi
 
             case "$dtype_raw" in
-                "Klines (candlestick)") dtype="klines"; dtype_idx=0 ;;
-                "Trades")               dtype="trades"; dtype_idx=1 ;;
-                "AggTrades")            dtype="aggTrades"; dtype_idx=2 ;;
+                "Klines (candlestick)"|"Klines") dtype="klines"; dtype_idx=0 ;;
+                "Trades")                        dtype="trades"; dtype_idx=1 ;;
+                "AggTrades")                     dtype="aggTrades"; dtype_idx=2 ;;
+                "bookTicker")                    dtype="bookTicker"; dtype_idx=3 ;;
+                "fundingRate")                   dtype="fundingRate"; dtype_idx=4 ;;
+                "markPriceKlines")               dtype="markPriceKlines"; dtype_idx=5 ;;
+                "indexPriceKlines")              dtype="indexPriceKlines"; dtype_idx=6 ;;
+                "premiumIndexKlines")            dtype="premiumIndexKlines"; dtype_idx=7 ;;
                 *)
                     printf '  %s⚠ %s is not yet implemented. Stay tuned!%s\n\n' "$YELLOW" "$dtype_raw" "$RESET" >&2
                     exit 0
@@ -1385,6 +1485,11 @@ run_interactive() {
         7)
             # ── Compute date splits ──
             splits_str=$(compute_date_splits "$start_date" "$end_date")
+            # Filter splits by archive availability
+            case "$dtype" in
+                fundingRate)
+                    splits_str=$(printf '%s\n' "$splits_str" | grep "^monthly ") ;;
+            esac
 
             # Flush any stale keypresses from the terminal input buffer
             while read -rsn1 -t 0.01 _ </dev/tty 2>/dev/null; do :; done
@@ -1423,7 +1528,14 @@ run_interactive() {
             local s_tf
             s_tf=$(echo $intervals_str | tr ' ' ', ')
             local s_range="$start_date -> $end_date"
-            local s_dl="$total_archives archives (${monthly_count} monthly + ${daily_count} daily)"
+            local s_dl
+            case "$dtype" in
+                fundingRate)
+                    s_dl="$total_archives archives (monthly only)" ;;
+                *)
+                    s_dl="$total_archives archives (${monthly_count} monthly + ${daily_count} daily)"
+                    ;;
+            esac
             local s_out="$total_output merged file(s)"
 
             # Find max content width: "  Label:      Value  " (label=13 + value + 2 padding)
