@@ -1139,7 +1139,9 @@ get_ts_columns() {
         fundingRate)           echo "calc_time:0" ;;
         markPriceKlines|indexPriceKlines|premiumIndexKlines)
                                echo "open_time:0 close_time:6" ;;
+        bookDepth)             echo "timestamp:0" ;;
         liquidationSnapshot)   echo "time:0" ;;
+        metrics)               echo "create_time:0" ;;
         BVOLIndex)             echo "calc_time:0" ;;
         *)                     echo "" ;;
     esac
