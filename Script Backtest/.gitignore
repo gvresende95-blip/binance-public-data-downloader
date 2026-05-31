@@ -1,0 +1,8 @@
+# Ignore generated data and outputs
+funding_opportunities_rows.csv
+resultado_arbitragem_funding_liquido.csv
+relatorio_auditoria_detalhado.csv
+script_backtest.py
+
+# Ignore this folder in Git
+Script Backtest/
