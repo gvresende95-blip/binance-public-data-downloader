@@ -3,6 +3,8 @@ funding_opportunities_rows.csv
 resultado_arbitragem_funding_liquido.csv
 relatorio_auditoria_detalhado.csv
 script_backtest.py
+script_backtest.log
+resultado_arbitragem_funding_liquido.xlsx
 
 # Ignore this folder in Git
 Script Backtest/
